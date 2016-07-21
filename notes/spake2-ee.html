@@ -1,0 +1,238 @@
+[curves] SPAKE2 and SPAKE2 Elligator Edition
+Mike Hamburg
+
+<!--beginarticle-->
+<PRE>Hello curves,
+
+It's been suggested that I explain Elligator and SPAKE2-EE in more 
+detail.  Get ready for a wall of text.
+
+TL;DR: SPAKE2-EE is probably slightly better overall than SPAKE2. It's 
+slightly faster, has better security assumptions, and makes one or two 
+cases that can arise in SPAKE2 slightly easier.  It's also more 
+complicated to spec and implement, since you need Elligator. 
+SPAKE2-vanilla needs more complicated optimizations to achieve its top 
+speed, but at least you don't have to spec them.
+
+
+Elligator 2:
+
+Elligator 2 is a map from the base field F to any elliptic curve E (over 
+a large characteristic field) with a point of order 2. There's also an 
+Elligator 1 but it's more complicated and has more restrictions, so 
+let's stick with Elligator 2.  If the curve doesn't have a point of 
+order 2 (eg, the NIST curves), then the Shallue-Woestijne-Ulas (SWU) 
+algorithm has very similar characteristics, and is only slightly more 
+complicated.
+
+Any curve with a point of order 2 is isomorphic to one of the form y^2 = 
+f(x) = x (x^2 + Ax + B), i.e. Weierstrass form with the point of order 2 
+at (0,0).  From there, the idea is to come up with two values x1 and x2 
+where one of them has a y on the curve and the other does not.  To do 
+this, it suffices that:
+
+x1^2 + Ax1 + B = x2^2 + Ax2 + B, and
+x1 / x2 is not square in F
+
+The first condition is equivalent to x1 + x2 = -A.  The second condition 
+is equivalent to x1 = ur^2 x2, where r is arbitrary and u is a fixed 
+nonsquare value, eg -1 if p==3 mod 4.  (If r=0 then actually x1/x2 = 0 
+will be square, but that's good enough because (0,0) is on the curve.)  
+Solving these two equations gives x2 = -A/(1+ur^2), and x1 = ur^2 * 
+that.  Notice that if you plug 1/ur into the equation for x1 you get x2 
+and vice-versa.
+
+So Elligator is conceptually pretty simple:
+
+* Map your input value to a field element r.
+* Compute whether f(-A/(1+ur^2)) is square.  If so, compute its square root.
+* If not, compute the square root of f(-Aur^2/(1+ur^2)) = ur^2 
+f(-A/(1+ur^2)).
+
+There are two important optimizations here.  The first is that you can 
+compute f(-A/(1+ur^2)) projectively, so you don't have to divide.  If it 
+ends up as C/D, then you can compute s = sqrt(CD) and then have y = s/D, 
+again projectively; or if you use the isqrt trick you can compute the 
+actual value of y.  This latter technique is better, because you can 
+easily enforce the spec that y is &quot;positive&quot; if you chose x1 and 
+&quot;negative&quot; if you chose x2, for your favorite definition of those terms 
+(even, Legendre symbol, whatever).
+
+The other important optimization is to compute both square roots in one 
+step.  For example, if p == 3 mod 4, then u=-1 and x^((p+1)/4) = 
+sqrt(+-x).  So compute f(...)^((p+1)/4).  If it comes out as 
+sqrt(f(...)), good.  If not, it's sqrt(-f(...)) but you want 
+sqrt(-r^2f(...)).  So multiply it by r and you're good.  In 5-mod-8 
+world, sqrt(-1) takes the place of -1 here.
+
+But you didn't want to hash to a Weierstrass curve.  You wanted to hash 
+to an Edwards curve.  No problem.  Just hash to the isomorphic 
+Montgomery curve, and apply the isomorphism, all in projective 
+coordinates.  Or, in cases like SPAKE2, you'll need to multiply by 4 so 
+that you get something in the main subgroup.  You can hash to Edwards 
+and multiply by 4, or you can hash to the isogenous Montgomery curve 
+instead of the isomorphic one, and apply the isogeny.  Your pick.
+
+All in all, this means you can compute Elligator 2 in projective 
+coordinates with maybe one isqrt, a dozen muls, 35 lines of code, a 
+couple cond-selects (or multiplies by values you know in advance to be 
++-1), and some careful testing.
+
+Elligator 2 is implemented in C as one of the many available point ops in:
+
+<A HREF="http://sourceforge.net/p/ed448goldilocks/code/ci/decaf/tree/src/ec_point.c">http://sourceforge.net/p/ed448goldilocks/code/ci/decaf/tree/src/ec_point.c</A>
+
+This is an unnecessarily nasty implementation, because it maps to affine 
+(using the inverse square root trick) instead of to projective.  Not 
+worth it.  The Decaf version is simpler.
+
+In the case of Decaf, the main spec is in terms of a Jacobi quartic, 
+rather than a Weierstrass or Edwards curve, but all the actual math 
+takes place in twisted Edwards.  The Jacobi quartic is isomorphic to L_d 
+:<i> y^2 = x(x-1)(x-d).  So you can do Elligator to that curve -- remember 
+</I>that Elligator 2 doesn't require a Montgomery curve -- and then use the 
+2-isogeny from there to the twisted Edwards curve where it does all its 
+math.  Same deal as with the Montgomery/Edwards combination, slightly 
+different formulas.
+
+This is implemented in C as decaf_point_from_hash_nonuniform in
+
+<A HREF="http://sourceforge.net/p/ed448goldilocks/code/ci/decaf/tree/src/decaf.c">http://sourceforge.net/p/ed448goldilocks/code/ci/decaf/tree/src/decaf.c</A>
+
+There's also a function decaf_point_from_hash_uniform which calls 
+Elligator twice and adds the results.  This is indifferentiable from a 
+random oracle, but twice as slow.  It's not necessary in most protocols, 
+because they really only need an argument that looks like &quot;for all you 
+know, the hashed point on the curve could secretly have an embedded CDH 
+challenge&quot; and that doesn't require uniformity, only almost-uniformity 
+and almost-invertibility.
+
+For an RFC-style spec, you'd probably want to turn one of these C 
+functions into a few lines of Python and specify that exact computation.
+
+
+
+OK, now on to PAKE.
+
+Elligator is 1:1 on [0,(p-1)/2], and it's easy to invert the map for 
+those points in E where it has an inverse.  This matters for EKE, 
+though, and we're talking about SPAKE2.  Remember that SPAKE2 works like so:
+
+Let g, M and N be random generators of G, with no known relationship in 
+the group.  Let &quot;password&quot; be a suitably stretched salted hash of the 
+actual password.  Either the client has to retrieve the salt, or it's 
+equal to her username and the server's name.
+
+Alice -&gt; Bob: A := g^x M^password, ID_Alice
+Bob -&gt; Alice: B := g^y N^password, ID_Bob
+
+This can be optimized by a double-exp, possibly with fixed bases if you 
+precomputed a table for M and one for N.  Also, the server can just 
+store M,N^password in the database.
+
+Both sides can now compute g^xy = (A/M^password)^y = (B/N^password)^x.  
+They can implement the division as written, or they can use a 
+double-exp, i.e. A^y M^(-password*y).
+
+Then both sides compute validators and session key vA,vB,sk = 
+H(A,B,ID_Alice,ID_Bob,g^xy,password).  The session messages are included 
+to prevent tampering.  The password is included as an artifact of the 
+security proof, and is probably technically unnecessary.  For augmented 
+versions of SPAKE2, a hash of password is also a good enough artifact.  
+Anyway, the two sides exchange validators and then start using the 
+session key.
+
+The two DH flows and the two validation flows can each happen 
+simultaneously, or more likely Bob's two flows will be merged but 
+Alice's will remain separate.
+
+
+SPAKE2-EE
+
+SPAKE2-EE (&quot;Elligator Edition&quot;) is a simple variant of this protocol, in 
+which M^password is replaced by h*Elligator(H(&quot;M&quot;,password)) where h is 
+the cofactor, and likewise for N.  It's very important to clear the 
+cofactor here, or to use a g which generates the entire group and not 
+just the main subgroup; otherwise the cofactor components of the 
+password hash will leak. Decaf's Elligator variant clears the cofactor 
+for you; Goldilocks' does not.
+
+Putting Elligator in clearly doesn't hurt the security of the protocol 
+in the ROM, because for all the attacker knows 
+h*Elligator(H(&quot;M&quot;,password)) is actually equal to, or at least morally 
+equivalent to, M^password.  The rigorous proof proceeds almost exactly 
+the same as SPAKE2 proof, but with an extra invocation of the random 
+oracle model.
+
+As far as I see it, SPAKE2-EE's advantage is that it's slightly tidier 
+than SPAKE2 proper, because it removes the static-DH assumption.  In 
+SPAKE2, you have to convince people that you generated M and N with no 
+relationship to g, because an adversary knowing the discrete log of M 
+base g can mount a dictionary attack against everyone.  (I believe that 
+the same is only true for N if the flow ordering allows Alice to 
+authenticate first.)  It shouldn't be hard to generate such an M,N, but 
+it's even better if you don't have to.
+
+SPAKE2-EE has a small performance advantage over SPAKE2 proper, at least 
+when Elligator is implemented as described above.  That implementation 
+takes under 1M/bit since the expensive part is the square root, but even 
+if you precompute tables for M,N, it will cost at least 1.8M/bit to 
+compute M^password and again 1.8M/bit for N.
+
+The cost is that you have to spec and implement Elligator, which is 
+annoying but not terrible.  At the same time, there won't be any 
+temptation to implement double-fixed-base-comb-exp routines to improve 
+performance.
+
+
+
+More-symmetric and less-symmetric PAKE:
+
+It's not very important that M != N.  I'm pretty sure the proof Trevor 
+cited of this is wrong, but I'm also pretty sure that a proof exists 
+under slightly worse assumptions than the original.
+
+Alternatively, N^password can be dropped, so long as Bob sends his 
+validator first.  (If Alice sends hers first without N^password, then a 
+fake Bob clearly has a dictionary attack because his first 
+password-related computation is to check the validator.)  This doesn't 
+harm the proof IIRC, it just adds the ordering restriction.
+
+These are both provable under some CDH variant (eg, GapDH if you like 
+shorter proofs with unrealistic assumptions, otherwise straight CDH with 
+tightness loss) in the random oracle model.
+
+SPAKE2-EE has the same properties as SPAKE2 with respect to these two 
+options.  It also has another option, which is that Alice and Bob use 
+either temporary identities (IP address, etc) or even just random 
+nonces, and replace M with h*Elligator(H(nonce_M,password)) and likewise 
+for N.
+
+
+
+Augmentation:
+
+SPAKE2 can be augmented, where the server's credentials (i.e. Bob's 
+credentials) are not sufficient to log in.  This is accomplished by 
+storing g^password2, where (password,password2) is the output of the key 
+strengthening function.  Alice can compute g^(y*password2) from Bob's 
+flow because she knows password2 and g^y.  Bob can compute it because he 
+knows y and g^password2.  So they can throw g^(y*password2) into the 
+hash function when they compute the session key.  Dan and Victor's book 
+calls this PAKE2+ and contains a security proof, but then again that 
+book isn't published.
+
+I suspect that many PAKEs can be augmented in a similar way, but they 
+usually aren't specified with augmentation.
+
+SPAKE2 can even be doubly augmented, where Alice does the same thing, 
+but I'm not sure if there's any application to that.
+
+Anyway, because SPAKE2EE only affects M^password and N^password, it 
+doesn't interfere with this augmentation scheme.
+
+Questions?  Comments?  Corrections?
+
+Cheers,
+-- Mike
+</PRE>

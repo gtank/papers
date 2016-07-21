@@ -1,0 +1,101 @@
+Short Weierstrass curves
+An elliptic curve in short Weierstrass form [database entry; Sage verification script; Sage output] has parameters a b and coordinates x y satisfying the following equations:
+
+  y2=x3+a*x+b
+
+Affine addition formulas: (x1,y1)+(x2,y2)=(x3,y3) where
+
+  x3 = (y2-y1)2/(x2-x1)2-x1-x2
+  y3 = (2*x1+x2)*(y2-y1)/(x2-x1)-(y2-y1)3/(x2-x1)3-y1
+
+Affine doubling formulas: 2(x1,y1)=(x3,y3) where
+
+  x3 = (3*x12+a)2/(2*y1)2-x1-x1
+  y3 = (2*x1+x1)*(3*x12+a)/(2*y1)-(3*x12+a)3/(2*y1)3-y1
+
+Affine negation formulas: -(x1,y1)=(x1,-y1).
+
+The neutral element of the curve is the unique point at infinity, namely (0:1:0) in projective coordinates.
+
+Representations for fast computations
+Jacobian coordinates with a4=0 [more information] make the additional assumptions
+
+  a=0
+
+and represent x y as X Y Z satisfying the following equations:
+
+  x=X/Z2
+  y=Y/Z3
+
+Jacobian coordinates with a4=-3 [more information] make the additional assumptions
+
+  a=-3
+
+and represent x y as X Y Z satisfying the following equations:
+
+  x=X/Z2
+  y=Y/Z3
+
+Jacobian coordinates [more information] represent x y as X Y Z satisfying the following equations:
+
+  x=X/Z2
+  y=Y/Z3
+
+Modified Jacobian coordinates [more information] represent x y as X Y Z T satisfying the following equations:
+
+  x=X/Z2
+  y=Y/Z3
+  T=a*Z4
+
+Projective coordinates with a4=-1 [more information] make the additional assumptions
+
+  a=-1
+
+and represent x y as X Y Z satisfying the following equations:
+
+  x=X/Z
+  y=Y/Z
+
+Projective coordinates with a4=-3 [more information] make the additional assumptions
+
+  a=-3
+
+and represent x y as X Y Z satisfying the following equations:
+
+  x=X/Z
+  y=Y/Z
+
+Projective coordinates [more information] represent x y as X Y Z satisfying the following equations:
+
+  x=X/Z
+  y=Y/Z
+
+W12 coordinates with a6=0 [more information] make the additional assumptions
+
+  b=0
+
+and represent x y as X Y Z satisfying the following equations:
+
+  x=X/Z
+  y=Y/Z2
+
+XYZZ coordinates with a4=-3 [more information] make the additional assumptions
+
+  a=-3
+
+and represent x y as X Y ZZ ZZZ satisfying the following equations:
+
+  x=X/ZZ
+  y=Y/ZZZ
+  ZZ3=ZZZ2
+
+XYZZ coordinates [more information] represent x y as X Y ZZ ZZZ satisfying the following equations:
+
+  x=X/ZZ
+  y=Y/ZZZ
+  ZZ3=ZZZ2
+
+XZ coordinates [more information] represent x y as X Z satisfying the following equations:
+
+  x=X/Z
+
